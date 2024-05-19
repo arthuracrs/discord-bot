@@ -1,0 +1,29 @@
+{
+  "name": "audio-stream",
+  "version": "1.0.0",
+  "description": "",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@discordjs/voice": "^0.16.1",
+    "@ffmpeg/ffmpeg": "^0.12.10",
+    "discord.js": "^14.14.1",
+    "ffmpeg-static": "^5.2.0",
+    "libsodium-wrappers": "^0.7.13",
+    "node-fetch": "^2.7.0",
+    "node-record-lpcm16": "^1.0.1",
+    "opusscript": "^0.0.8",
+    "play-dl": "^1.9.7"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.3.0",
+    "eslint": "^9.3.0",
+    "globals": "^15.2.0"
+  }
+}
