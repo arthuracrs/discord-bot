@@ -26,9 +26,18 @@ for (const folder of commandFolders) {
 
     for (const file of commandFiles) {
         const filePath = path.join(commandsPath, file);
-        const { default: command } = await import(filePath);
-        if ('data' in command && 'execute' in command) {
-            commands.push(command.data.toJSON());
+        const { default: commandOrCommands } = await import(filePath);
+
+        if (Array.isArray(commandOrCommands)) {
+            commandOrCommands.forEach(command => {
+                if ('data' in command && 'execute' in command) {
+                    commands.push(command.data.toJSON());
+                } else {
+                    console.log(`[WARNING] A command in ${filePath} is missing a required "data" or "execute" property.`);
+                }
+            });
+        } else if ('data' in commandOrCommands && 'execute' in commandOrCommands) {
+            commands.push(commandOrCommands.data.toJSON());
         } else {
             console.log(`[WARNING] The command at ${filePath} is missing a required "data" or "execute" property.`);
         }
@@ -41,11 +50,11 @@ const rest = new REST().setToken(token);
     try {
         console.log(`Started refreshing ${commands.length} application (/) commands.`);
 
-        await rest.put(Routes.applicationGuildCommands(clientId, guildId), { body: [] })
-        console.log('Successfully deleted all guild commands.')
+        await rest.put(Routes.applicationGuildCommands(clientId, guildId), { body: [] });
+        console.log('Successfully deleted all guild commands.');
 
-        await rest.put(Routes.applicationCommands(clientId), { body: [] })
-        console.log('Successfully deleted all application commands.')
+        await rest.put(Routes.applicationCommands(clientId), { body: [] });
+        console.log('Successfully deleted all application commands.');
 
         const data = await rest.put(
             Routes.applicationGuildCommands(clientId, guildId),
