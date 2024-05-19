@@ -1,56 +1,161 @@
 import { SlashCommandBuilder } from '@discordjs/builders';
-import { joinVoiceChannel, createAudioPlayer, createAudioResource } from '@discordjs/voice';
+import { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus, getVoiceConnection } from '@discordjs/voice';
 import playdl from 'play-dl';
 
-export default {
-    data: new SlashCommandBuilder()
-        .setName('youtube')
-        .setDescription("Play audio from a YouTube video in your voice channel.")
-        .addStringOption(option =>
-            option.setName('url')
-                .setDescription('The YouTube URL of the audio to play')
-                .setRequired(true)),
-    async execute(interaction) {
-        try {
-            const url = interaction.options.getString('url');
-            if (!url) {
-                await interaction.reply('You need to provide a YouTube URL!');
-                return;
-            }
+const queues = new Map();
 
-            if (!interaction.member.voice.channel) {
-                await interaction.reply('You need to join a voice channel first!');
-                return;
-            }
+const playNextInQueue = async (interaction, queue) => {
+    if (!queue.length) {
+        await interaction.followUp('Queue is empty.');
+        return;
+    }
 
-            await interaction.deferReply();
+    const url = queue[0];
+    const voiceChannel = interaction.member.voice.channel;
+    const connection = joinVoiceChannel({
+        channelId: voiceChannel.id,
+        guildId: interaction.guild.id,
+        adapterCreator: interaction.guild.voiceAdapterCreator,
+    });
 
-            const connection = joinVoiceChannel({
-                channelId: interaction.member.voice.channel.id,
-                guildId: interaction.guild.id,
-                adapterCreator: interaction.guild.voiceAdapterCreator,
-            });
+    const player = createAudioPlayer();
+    connection.subscribe(player);
 
-            const player = createAudioPlayer();
+    try {
+        const stream = await playdl.stream(url);
+        const resource = createAudioResource(stream.stream, {
+            inputType: stream.type,
+        });
 
-            const stream = await playdl.stream(url);
+        player.play(resource);
+        await interaction.followUp(`Now playing: ${url}`);
 
-            const resource = createAudioResource(stream.stream, {
-                inputType: stream.type,
-            });
+        player.on(AudioPlayerStatus.Idle, async () => {
+            queue.shift();
+            await playNextInQueue(interaction, queue);
+        });
 
-            player.play(resource);
-
-            connection.subscribe(player);
-
-            await interaction.followUp('Playing audio...');
-        } catch (error) {
-            console.error(error);
-            if (interaction.replied || interaction.deferred) {
-                await interaction.followUp('An error occurred while trying to play the audio.');
-            } else {
-                await interaction.reply('An error occurred while trying to play the audio.');
-            }
-        }
-    },
+    } catch (error) {
+        console.error(error);
+        await interaction.followUp('An error occurred while trying to play the audio.');
+        queue.shift(); 
+        await playNextInQueue(interaction, queue);
+    }
 };
+
+export default [
+    {
+        data: new SlashCommandBuilder()
+            .setName('youtube')
+            .setDescription("Play audio from a YouTube video in your voice channel.")
+            .addStringOption(option =>
+                option.setName('url')
+                    .setDescription('The YouTube URL of the audio to play')
+                    .setRequired(true)),
+        async execute(interaction) {
+            try {
+                const url = interaction.options.getString('url');
+                if (!url) {
+                    await interaction.reply('You need to provide a YouTube URL!');
+                    return;
+                }
+
+                const voiceChannel = interaction.member.voice.channel;
+                if (!voiceChannel) {
+                    await interaction.reply('You need to join a voice channel first!');
+                    return;
+                }
+
+                await interaction.deferReply();
+
+                let queue = queues.get(interaction.guild.id);
+                if (!queue) {
+                    queue = [];
+                    queues.set(interaction.guild.id, queue);
+                }
+
+                queue.push(url);
+
+                if (queue.length === 1) {
+                    await playNextInQueue(interaction, queue);
+                } else {
+                    await interaction.followUp('Added to the queue.');
+                }
+
+            } catch (error) {
+                console.error(error);
+                if (interaction.replied || interaction.deferred) {
+                    await interaction.followUp('An error occurred while trying to play the audio.');
+                } else {
+                    await interaction.reply('An error occurred while trying to play the audio.');
+                }
+            }
+        },
+    },
+    {
+        data: new SlashCommandBuilder()
+            .setName('next')
+            .setDescription("Skip the current song and play the next one in the queue."),
+        async execute(interaction) {
+            try {
+                const queue = queues.get(interaction.guild.id);
+                if (!queue || queue.length === 0) {
+                    await interaction.reply('The queue is empty.');
+                    return;
+                }
+
+                const voiceChannel = interaction.member.voice.channel;
+                if (!voiceChannel) {
+                    await interaction.reply('You need to join a voice channel first!');
+                    return;
+                }
+
+                await interaction.deferReply();
+                queue.shift();
+                await playNextInQueue(interaction, queue);
+
+            } catch (error) {
+                console.error(error);
+                if (interaction.replied || interaction.deferred) {
+                    await interaction.followUp('An error occurred while trying to skip the song.');
+                } else {
+                    await interaction.reply('An error occurred while trying to skip the song.');
+                }
+            }
+        },
+    },
+    {
+        data: new SlashCommandBuilder()
+            .setName('clearqueue')
+            .setDescription("Clear the entire queue."),
+        async execute(interaction) {
+            try {
+                const queue = queues.get(interaction.guild.id);
+                if (!queue || queue.length === 0) {
+                    await interaction.reply('The queue is already empty.');
+                    return;
+                }
+
+                queues.set(interaction.guild.id, []);
+
+                const voiceChannel = interaction.member.voice.channel;
+                if (voiceChannel) {
+                    const connection = getVoiceConnection(interaction.guild.id);
+                    if (connection) {
+                        connection.destroy(); 
+                    }
+                }
+
+                await interaction.reply('The queue has been cleared.');
+
+            } catch (error) {
+                console.error(error);
+                if (interaction.replied || interaction.deferred) {
+                    await interaction.followUp('An error occurred while trying to clear the queue.');
+                } else {
+                    await interaction.reply('An error occurred while trying to clear the queue.');
+                }
+            }
+        },
+    },
+];
