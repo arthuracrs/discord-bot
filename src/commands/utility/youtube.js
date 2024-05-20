@@ -28,7 +28,7 @@ const playNextInQueue = async (interaction, queue) => {
         });
 
         player.play(resource);
-        await interaction.followUp(`Now playing: ${url}`);
+        await interaction.followUp(`Escuta ai o carro da rua passando no seu ovo: ${url}`);
 
         player.on(AudioPlayerStatus.Idle, async () => {
             queue.shift();
