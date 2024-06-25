@@ -1,9 +1,89 @@
 import { SlashCommandBuilder } from '@discordjs/builders';
 import { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus, getVoiceConnection } from '@discordjs/voice';
 import playdl from 'play-dl';
+import { PassThrough } from 'stream';
+import { spawn, spawnSync } from 'child_process';
 
 const queues = new Map();
 
+const playNextInQueueV2 = async (interaction, queue) => {
+    if (!queue.length) {
+        await interaction.followUp('Queue is empty.');
+        return;
+    }
+
+    const url = queue[0];
+
+    try {
+        const connection = joinVoiceChannel({
+            channelId: interaction.member.voice.channel.id,
+            guildId: interaction.guild.id,
+            adapterCreator: interaction.guild.voiceAdapterCreator,
+        });
+
+        const player = createAudioPlayer();
+
+        const ytDlpProcess = spawnSync('yt-dlp', [
+            '--extract-audio',
+            '--audio-format', 'wav',
+            '--audio-quality', '0',
+            '--no-playlist',
+            '--quiet',
+            '--default-search', 'auto',
+            '--get-url',
+            url
+        ]);
+
+        if (ytDlpProcess.error) {
+            console.error('Error:', ytDlpProcess.error);
+            await interaction.followUp('Invalid URL provided');
+            return;
+        }
+        
+        const audioUrl = ytDlpProcess.stdout.toString().trim();
+
+        if (!audioUrl) {
+            await interaction.followUp('Could not extract audio from the provided URL.');
+            return;
+        }
+
+        const passThrough = new PassThrough();
+
+        const ffmpegChildProcess = spawn('ffmpeg', [
+            '-i', audioUrl,
+            '-f', 'wav', '-ar', '48000', '-ac', '1', '-'
+        ], {});
+
+        ffmpegChildProcess.stderr.on('data', (data) => {
+            console.error(`FFmpeg stderr: ${data}`);
+        });
+        ffmpegChildProcess.on('exit', (code, signal) => {
+            if (code !== 0) {
+                console.error(`FFmpeg process exited with code ${code} and signal ${signal}`);
+            }
+        });
+        ffmpegChildProcess.stdout.pipe(passThrough);
+
+        player.play(createAudioResource(passThrough));
+
+        connection.subscribe(player);
+
+        await interaction.followUp(`Escuta ai o carro da rua passando no seu ovo: ${url}`);
+
+        player.on(AudioPlayerStatus.Idle, async () => {
+            queue.shift();
+            await playNextInQueueV2(interaction, queue);
+        });
+
+    } catch (error) {
+        console.error(error);
+        await interaction.followUp('An error occurred while trying to play the audio.');
+        queue.shift();
+        await playNextInQueueV2(interaction, queue);
+    }
+};
+
+// eslint-disable-next-line no-unused-vars
 const playNextInQueue = async (interaction, queue) => {
     if (!queue.length) {
         await interaction.followUp('Queue is empty.');
@@ -43,6 +123,8 @@ const playNextInQueue = async (interaction, queue) => {
     }
 };
 
+const playFunc = playNextInQueueV2
+
 export default [
     {
         data: new SlashCommandBuilder()
@@ -77,7 +159,7 @@ export default [
                 queue.push(url);
 
                 if (queue.length === 1) {
-                    await playNextInQueue(interaction, queue);
+                    await playFunc(interaction, queue);
                 } else {
                     await interaction.followUp('Added to the queue.');
                 }
@@ -112,7 +194,7 @@ export default [
 
                 await interaction.deferReply();
                 queue.shift();
-                await playNextInQueue(interaction, queue);
+                await playFunc(interaction, queue);
 
             } catch (error) {
                 console.error(error);
@@ -195,7 +277,7 @@ export default [
                 }
 
                 if (queue.length === playlistInfo.videos.length) {
-                    await playNextInQueue(interaction, queue);
+                    await playFunc(interaction, queue);
                 } else {
                     await interaction.followUp('Added playlist to the queue.');
                 }
